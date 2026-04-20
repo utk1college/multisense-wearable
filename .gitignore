@@ -1,0 +1,19 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Secrets
+google-services.json
+app/google-services.json
+
+# Built artifacts
+*.apk
+*.aar
+app/build/
