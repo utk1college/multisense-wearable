@@ -171,9 +171,6 @@ class UnifiedRecordingCycle(
      */
     private fun startCycle() {
         cycleStartTime = System.currentTimeMillis() / 60000 * 60000
-        pendingTranscription = null
-        pendingAudioResult = null
-        pendingKeywordAnalysis = null
 
         Log.d(TAG, "")
         Log.d(TAG, "===============================================================")
@@ -189,6 +186,9 @@ class UnifiedRecordingCycle(
      * Record audio, extract features, and run Vosk transcription.
      */
     private fun startRecordingAndTranscribe() {
+        // Capture cycle ID at the time of recording start
+        val recordingCycleId = cycleStartTime
+        
         Log.d(TAG, "SPEAK NOW  recording started for ${RECORDING_DURATION_MS / 1000}s")
 
         coroutineScope.launch {
@@ -200,7 +200,7 @@ class UnifiedRecordingCycle(
                     Log.e(TAG, "Audio recording failed")
                     withContext(Dispatchers.Main) {
                         listener?.onRecordingFinished()
-                        performFusionAndUpload()
+                        performFusionAndUpload(recordingCycleId, null, null, null)
                     }
                     return@launch
                 }
@@ -242,13 +242,13 @@ class UnifiedRecordingCycle(
 
                 // STEP 4: Perform fusion and upload
                 withContext(Dispatchers.Main) {
-                    performFusionAndUpload()
+                    performFusionAndUpload(recordingCycleId, audioResult, pendingTranscription, pendingKeywordAnalysis)
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Recording/transcription error", e)
                 withContext(Dispatchers.Main) {
-                    performFusionAndUpload()
+                    performFusionAndUpload(recordingCycleId, null, null, null)
                 }
             }
         }
@@ -257,7 +257,12 @@ class UnifiedRecordingCycle(
     /**
      * Perform fusion scoring and upload to Firebase.
      */
-    private fun performFusionAndUpload() {
+    private fun performFusionAndUpload(
+        cycleId: Long,
+        audioResult: AudioRecordingResult?,
+        transcription: TranscriptionResult?,
+        keywordAnalysis: KeywordAnalysisResult?
+    ) {
         try {
             Log.d(TAG, "PREPARING UPLOAD  t+${getElapsedSeconds()}s")
 
@@ -270,27 +275,26 @@ class UnifiedRecordingCycle(
                 )
             }
 
-            // Get audio features
-            val audioFeatures = pendingAudioResult?.features ?: AudioFeatures(
+            // Get audio features from the recorded result
+            val audioFeatures = audioResult?.features ?: AudioFeatures(
                 energy = 0.0, energyVariance = 0.0, zcr = 0.0,
                 spectralCentroid = 0.0, spectralBandwidth = 0.0, spectralFlux = 0.0,
                 pitch = 0.0, speechRatio = 0.0, mfcc = List(13) { 0.0 }
             )
 
             // Get keyword analysis
-            val keywordAnalysis = pendingKeywordAnalysis ?: KeywordAnalysisResult.EMPTY
-            val transcription = pendingTranscription ?: TranscriptionResult.EMPTY
+            val kwordAnalysis = keywordAnalysis ?: KeywordAnalysisResult.EMPTY
+            val transcriptionResult = transcription ?: TranscriptionResult.EMPTY
 
             val combinedScore = CombinedAgitationScore.EMPTY
 
             Log.d(TAG, "SCORING MODE  dashboard-side score reconstruction")
 
             // Upload to Firebase
-            uploadToFirebase(audioFeatures, transcription, keywordAnalysis, motionStats)
+            uploadToFirebase(cycleId, audioFeatures, transcriptionResult, kwordAnalysis, motionStats)
 
             // Notify listener
             listener?.onProcessingComplete(combinedScore)
-            clearPendingData()
 
         } catch (e: Exception) {
             Log.e(TAG, "Fusion scoring error", e)
@@ -302,13 +306,13 @@ class UnifiedRecordingCycle(
      * Upload data to Firebase.
      */
     private fun uploadToFirebase(
+        cycleId: Long,
         audioFeatures: AudioFeatures,
         transcription: TranscriptionResult,
         keywordAnalysis: KeywordAnalysisResult,
         motionStats: MotionStats
     ) {
-        val timestamp = cycleStartTime
-        val cycleId = cycleStartTime
+        val timestamp = cycleId
         val patientId = "patient_001"
         val deviceId = "watch_001"
 
@@ -396,13 +400,6 @@ class UnifiedRecordingCycle(
     private fun handleCycleError(error: String) {
         Log.e(TAG, "Cycle error: $error")
         listener?.onCycleError(error)
-        clearPendingData()
-    }
-
-    private fun clearPendingData() {
-        pendingAudioResult = null
-        pendingTranscription = null
-        pendingKeywordAnalysis = null
     }
 
     private fun clearBuffers() {
